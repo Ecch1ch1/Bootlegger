@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bootlegger — Interactive Slack Steganography Visualizer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@400;600;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Top Bar -->
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand-icon">🥾📦</span>
+        <div class="brand-text">
+          <h1>BOOTLEGGER</h1>
+          <span class="brand-tag">Plausible Deniability & Slack Steganography Inspector</span>
+        </div>
+      </div>
+      <div class="header-badges">
+        <span class="badge badge-mpl">MPL-2.0</span>
+        <span class="badge badge-stealth" id="stealthBadge">Zero-Footprint POSIX TAR</span>
+        <span class="badge badge-tripwire" id="tripwireBadge">🛡️ Tripwire: ARMED</span>
+      </div>
+    </header>
+
+    <!-- Main Workspace Grid -->
+    <main class="workspace">
+      <!-- Left Column: Controls & Simulation -->
+      <section class="panel control-panel">
+        <div class="panel-header">
+          <h2>⚡ Stego Controls & Simulation</h2>
+          <span class="subtitle">Multi-tier Coercion & Tamper Lab</span>
+        </div>
+
+        <div class="control-group">
+          <label for="passphraseInput">Passphrase (Master / Duress / Invalid)</label>
+          <div class="input-with-button">
+            <input type="text" id="passphraseInput" placeholder="Enter passphrase..." value="MasterKey2027!">
+            <button id="btnDecrypt" class="btn btn-primary">Decrypt & Inspect</button>
+          </div>
+          <div class="quick-passwords">
+            <span class="quick-label">Presets:</span>
+            <button class="btn-chip chip-master" data-pass="MasterKey2027!">Master Key</button>
+            <button class="btn-chip chip-duress" data-pass="CoercedDuressPass!">Duress Decoy</button>
+            <button class="btn-chip chip-wrong" data-pass="WrongPass123">Invalid Key</button>
+          </div>
+        </div>
+
+        <!-- Decryption Result Banner -->
+        <div class="result-banner" id="resultBanner">
+          <div class="result-status" id="resultStatus">Awaiting Passphrase</div>
+          <div class="result-details" id="resultDetails">Click "Decrypt & Inspect" to resolve micro-shards.</div>
+        </div>
+
+        <!-- Coercion & Plausible Deniability Theory -->
+        <div class="theory-box">
+          <div class="theory-title">🎭 Plausible Deniability Mechanism</div>
+          <p>
+            When forced to disclose a key under duress, providing the <strong>Duress Passphrase</strong> extracts a harmless decoy file (Partition B). The examiner has <strong>zero mathematical proof</strong> that Master Partition A even exists—it appears as ordinary random block slack noise!
+          </p>
+        </div>
+
+        <!-- Tripwire Simulation -->
+        <div class="tripwire-box">
+          <div class="tripwire-header">
+            <span>🛡️ Tripwire Anti-Tamper Engine</span>
+            <span class="tripwire-indicator clean" id="tripwireIndicator">INTEGRITY 100% INTACT</span>
+          </div>
+          <p class="tripwire-desc">
+            All cover files are pinned via a BLAKE3 Merkle tree incorporated as AEAD AAD. Altering even 1 bit causes Poly1305 MAC failure.
+          </p>
+          <div class="tripwire-actions">
+            <button id="btnTamper" class="btn btn-danger">⚠️ Simulate Adversary Tamper (Flip 1 Bit)</button>
+            <button id="btnResetTamper" class="btn btn-secondary">↺ Restore Carrier Integrity</button>
+          </div>
+        </div>
+
+        <!-- Carrier Metrics -->
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <div class="metric-label">Decoy Files</div>
+            <div class="metric-val" id="valFiles">5 files</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Total Blocks</div>
+            <div class="metric-val" id="valBlocks">23 blocks (11.7 KB)</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Total Slack</div>
+            <div class="metric-val" id="valSlack">1,458 bytes</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Dilution Ratio</div>
+            <div class="metric-val" id="valDilution">1.46% (Safe)</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Column: Interactive Block Memory Map -->
+      <section class="panel map-panel">
+        <div class="panel-header">
+          <h2>📦 512-Byte TAR Block Memory Grid</h2>
+          <div class="legend">
+            <span class="legend-item"><span class="legend-dot dot-header"></span> TAR Header (512B)</span>
+            <span class="legend-item"><span class="legend-dot dot-data"></span> Decoy Data</span>
+            <span class="legend-item"><span class="legend-dot dot-slack"></span> Slack Space</span>
+            <span class="legend-item"><span class="legend-dot dot-primary"></span> Primary Shards</span>
+            <span class="legend-item"><span class="legend-dot dot-duress"></span> Duress Shards</span>
+          </div>
+        </div>
+
+        <!-- Interactive Grid -->
+        <div class="block-grid" id="blockGrid">
+          <!-- Dynamically populated blocks -->
+        </div>
+
+        <!-- Block Inspector Card -->
+        <div class="block-inspector" id="blockInspector">
+          <div class="inspector-title" id="inspTitle">Block #0 — Select or hover any block to inspect</div>
+          <div class="inspector-meta" id="inspMeta">Offset: 0x0000 | Type: USTAR Header | Length: 512 bytes</div>
+          <div class="inspector-hex" id="inspHex">73 72 63 2f 6d 61 69 6e 2e 72 73 00 00 00 00 00  src/main.rs.....</div>
+        </div>
+
+        <!-- Real-time Shannon Entropy Spectrum -->
+        <div class="entropy-section">
+          <div class="entropy-header">
+            <h3>🔬 Shannon Entropy Profile per Block (0.0 to 8.0)</h3>
+            <span class="entropy-avg" id="entropyAvg">Average Entropy: 5.14 / 8.00 (Natural)</span>
+          </div>
+          <div class="entropy-chart" id="entropyChart">
+            <!-- Dynamic entropy bars -->
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <span>Bootlegger v0.1.0 • Built with Rust & Web Standards • Licensed under MPL-2.0</span>
+      <a href="https://github.com/Ecch1ch1/Bootlegger" target="_blank" class="github-link">GitHub Repository ↗</a>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

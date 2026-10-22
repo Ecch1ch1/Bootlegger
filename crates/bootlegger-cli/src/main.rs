@@ -44,6 +44,14 @@ enum Commands {
         #[arg(short, long)]
         password: Option<String>,
 
+        /// Optional harmless decoy secret for Coercion/Duress defense (revealed only if duress password is used)
+        #[arg(long)]
+        duress_secret: Option<PathBuf>,
+
+        /// Passphrase for duress layer (prompts if omitted when --duress-secret is used)
+        #[arg(long)]
+        duress_password: Option<String>,
+
         /// Enable Tripwire anti-tamper pinning (if carrier is altered or inspected, secret self-destructs)
         #[arg(long, default_value_t = false)]
         tripwire: bool,
@@ -205,6 +213,8 @@ fn main() {
             cover,
             out,
             password,
+            duress_secret,
+            duress_password,
             tripwire,
             ratio,
         } => {
@@ -282,7 +292,47 @@ fn main() {
                 println!("  🛡️  Tripwire Anti-Tamper: {}", "Disabled".yellow());
             }
 
-            match TarEngine::pack(&decoys, &payload, pass.as_bytes(), tripwire, Some(ratio)) {
+            let res_archive = if let Some(ref d_secret_path) = duress_secret {
+                let d_data = match fs::read(d_secret_path) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        eprintln!("{} Failed to read duress secret: {}", "Error:".red().bold(), e);
+                        std::process::exit(1);
+                    }
+                };
+                let d_name = d_secret_path
+                    .file_name()
+                    .map(|f| f.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "decoy_secret.txt".to_string());
+                let duress_payload = SecretPayload::new(d_name, d_data);
+
+                let d_pass = if let Some(p) = duress_password {
+                    p
+                } else if let Ok(env_p) = std::env::var("BOOTLEGGER_DURESS_PASSWORD") {
+                    env_p
+                } else {
+                    print!("{}", "🔑 Enter DURESS (decoy) passphrase: ".bold().magenta());
+                    io::stdout().flush().unwrap();
+                    let mut buf = String::new();
+                    io::stdin().read_line(&mut buf).unwrap();
+                    buf.trim_end_matches(['\r', '\n']).to_string()
+                };
+
+                println!("  🎭 Multi-Tier Plausible Deniability: {}", "Active (Primary + Duress)".magenta().bold());
+                TarEngine::pack_dual(
+                    &decoys,
+                    &payload,
+                    pass.as_bytes(),
+                    &duress_payload,
+                    d_pass.as_bytes(),
+                    tripwire,
+                    Some(ratio),
+                )
+            } else {
+                TarEngine::pack(&decoys, &payload, pass.as_bytes(), tripwire, Some(ratio))
+            };
+
+            match res_archive {
                 Ok(archive_bytes) => {
                     if let Err(e) = fs::write(&out, &archive_bytes) {
                         eprintln!("{} Failed to write output archive: {}", "Error:".red().bold(), e);

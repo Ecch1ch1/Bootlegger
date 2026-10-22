@@ -1,6 +1,6 @@
 use bootlegger_core::{
     accountant::DilutionAccountant,
-    crypto::{CryptoEngine, NONCE_LEN, SALT_LEN, TAG_LEN},
+    crypto::{CryptoEngine, DerivedKeys, NONCE_LEN, SALT_LEN, TAG_LEN},
     dispersion::{DispersionScheduler, SecretPayload, SlackSlot},
     error::{BootlegError, Result},
     tripwire::{CarrierEntry, Tripwire},
@@ -94,7 +94,7 @@ fn create_tar_header(file: &DecoyFile) -> [u8; TAR_BLOCK_SIZE] {
     // Size (124..136)
     write_octal(&mut block[124..136], file.content.len() as u64);
 
-    // Mtime (136..144)
+    // Mtime (136..148)
     write_octal(&mut block[136..148], file.mtime);
 
     // Typeflag (156) - '0' = regular file
@@ -124,7 +124,7 @@ fn create_tar_header(file: &DecoyFile) -> [u8; TAR_BLOCK_SIZE] {
 pub struct TarEngine;
 
 impl TarEngine {
-    /// Packs decoy files and injects encrypted secret into block slack spaces
+    /// Packs decoy files and injects single encrypted secret into block slack spaces
     pub fn pack(
         decoys: &[DecoyFile],
         secret: &SecretPayload,
@@ -140,7 +140,6 @@ impl TarEngine {
             });
         }
 
-        // 1. Build carrier entries and compute tripwire
         let entries: Vec<CarrierEntry> = decoys.iter().map(|d| d.to_carrier_entry()).collect();
         let tripwire = if enable_tripwire {
             Some(Tripwire::compute(&entries))
@@ -149,30 +148,25 @@ impl TarEngine {
         };
         let tripwire_digest = tripwire.as_ref().map(|t| &t.digest);
 
-        // 2. Compute carrier salt and derive keys
         let carrier_salt = compute_carrier_salt(&entries);
         let keys = CryptoEngine::derive_keys(password, &carrier_salt)?;
 
-        // 3. Serialize secret message and check dilution budget
         let secret_bytes = secret.to_bytes();
-        let needed_overhead = NONCE_LEN + TAG_LEN + 4; // Nonce + Tag + 4-byte length prefix
+        let needed_overhead = NONCE_LEN + TAG_LEN + 4;
         let total_needed = secret_bytes.len() + needed_overhead;
 
         DilutionAccountant::assess(&entries, total_needed, max_dilution_ratio)?;
 
-        // 4. Encrypt secret payload using derived keys
         let encrypted_bundle = CryptoEngine::encrypt_with_keys(
             &secret_bytes,
             &keys,
             tripwire_digest,
         )?;
 
-        // 5. Compute slack slots for each file
         let mut slots = Vec::new();
         let mut running_offset: u64 = 0;
 
         for (idx, decoy) in decoys.iter().enumerate() {
-            // Header block
             running_offset += TAR_BLOCK_SIZE as u64;
 
             let file_len = decoy.content.len();
@@ -190,25 +184,18 @@ impl TarEngine {
                 capacity: slack_capacity,
             });
 
-            let total_file_blocks = file_len.div_ceil(TAR_BLOCK_SIZE);
-            running_offset += (total_file_blocks * TAR_BLOCK_SIZE) as u64;
+            running_offset += file_len.div_ceil(TAR_BLOCK_SIZE) as u64 * TAR_BLOCK_SIZE as u64;
         }
 
-        // 6. Disperse encrypted stream across slots
         let dispersed = DispersionScheduler::disperse(&encrypted_bundle, &slots, &keys.prng_seed)?;
 
-        // 7. Write TAR archive
         let mut archive = Vec::with_capacity(running_offset as usize + 2 * TAR_BLOCK_SIZE);
 
         for (idx, decoy) in decoys.iter().enumerate() {
-            // Write 512B header
             let header = create_tar_header(decoy);
             archive.write_all(&header)?;
-
-            // Write content
             archive.write_all(&decoy.content)?;
 
-            // Write slack (assigned shard + noise)
             let remainder = decoy.content.len() % TAR_BLOCK_SIZE;
             if remainder != 0 {
                 let slack_len = TAR_BLOCK_SIZE - remainder;
@@ -221,19 +208,149 @@ impl TarEngine {
                 if slot_data.len() == slack_len {
                     archive.write_all(slot_data)?;
                 } else {
-                    // Fallback to zeroes
                     archive.write_all(&vec![0u8; slack_len])?;
                 }
             }
         }
 
-        // Write End-of-Archive (two 512B zero blocks = 1024 bytes)
+        // Two 512B zero blocks (EOA)
         archive.write_all(&[0u8; 2 * TAR_BLOCK_SIZE])?;
 
         Ok(archive)
     }
 
-    /// Unpacks and recovers secret payload from a Bootlegger TAR archive
+    /// Packs decoy files with two layers of secrets: Primary (Master) and Duress (Coercion)
+    pub fn pack_dual(
+        decoys: &[DecoyFile],
+        primary_secret: &SecretPayload,
+        primary_password: &[u8],
+        duress_secret: &SecretPayload,
+        duress_password: &[u8],
+        enable_tripwire: bool,
+        max_dilution_ratio: Option<f64>,
+    ) -> Result<Vec<u8>> {
+        if decoys.is_empty() {
+            return Err(BootlegError::InsufficientCapacity {
+                needed_bytes: primary_secret.data.len() + duress_secret.data.len(),
+                available_bytes: 0,
+                additional_files_needed: 10,
+            });
+        }
+
+        let entries: Vec<CarrierEntry> = decoys.iter().map(|d| d.to_carrier_entry()).collect();
+        let tripwire = if enable_tripwire {
+            Some(Tripwire::compute(&entries))
+        } else {
+            None
+        };
+        let tripwire_digest = tripwire.as_ref().map(|t| &t.digest);
+
+        let carrier_salt = compute_carrier_salt(&entries);
+        let keys_prim = CryptoEngine::derive_keys(primary_password, &carrier_salt)?;
+        let keys_duress = CryptoEngine::derive_keys(duress_password, &carrier_salt)?;
+
+        let prim_bytes = primary_secret.to_bytes();
+        let duress_bytes = duress_secret.to_bytes();
+        let overhead = NONCE_LEN + TAG_LEN + 4;
+        let total_combined = prim_bytes.len() + duress_bytes.len() + 2 * overhead;
+
+        DilutionAccountant::assess(&entries, total_combined, max_dilution_ratio)?;
+
+        let bundle_prim = CryptoEngine::encrypt_with_keys(&prim_bytes, &keys_prim, tripwire_digest)?;
+        let bundle_duress = CryptoEngine::encrypt_with_keys(&duress_bytes, &keys_duress, tripwire_digest)?;
+
+        let mut slots_a = Vec::new();
+        let mut slots_b = Vec::new();
+        let mut running_offset: u64 = 0;
+
+        for (idx, decoy) in decoys.iter().enumerate() {
+            running_offset += TAR_BLOCK_SIZE as u64;
+
+            let file_len = decoy.content.len();
+            let remainder = file_len % TAR_BLOCK_SIZE;
+            let slack_capacity = if remainder == 0 { 0 } else { TAR_BLOCK_SIZE - remainder };
+
+            let cap_a = slack_capacity / 2;
+            let cap_b = slack_capacity - cap_a;
+
+            let slack_offset = running_offset + file_len as u64;
+            slots_a.push(SlackSlot {
+                file_index: idx,
+                archive_offset: slack_offset,
+                capacity: cap_a,
+            });
+            slots_b.push(SlackSlot {
+                file_index: idx,
+                archive_offset: slack_offset + cap_a as u64,
+                capacity: cap_b,
+            });
+
+            running_offset += file_len.div_ceil(TAR_BLOCK_SIZE) as u64 * TAR_BLOCK_SIZE as u64;
+        }
+
+        let dispersed_a = DispersionScheduler::disperse(&bundle_prim, &slots_a, &keys_prim.prng_seed)?;
+        let dispersed_b = DispersionScheduler::disperse(&bundle_duress, &slots_b, &keys_duress.prng_seed)?;
+
+        let mut archive = Vec::with_capacity(running_offset as usize + 2 * TAR_BLOCK_SIZE);
+
+        for (idx, decoy) in decoys.iter().enumerate() {
+            let header = create_tar_header(decoy);
+            archive.write_all(&header)?;
+            archive.write_all(&decoy.content)?;
+
+            let remainder = decoy.content.len() % TAR_BLOCK_SIZE;
+            if remainder != 0 {
+                let part_a = dispersed_a
+                    .iter()
+                    .find(|(s, _)| s.file_index == idx)
+                    .map(|(_, d)| d.as_slice())
+                    .unwrap_or(&[]);
+                let part_b = dispersed_b
+                    .iter()
+                    .find(|(s, _)| s.file_index == idx)
+                    .map(|(_, d)| d.as_slice())
+                    .unwrap_or(&[]);
+
+                archive.write_all(part_a)?;
+                archive.write_all(part_b)?;
+            }
+        }
+
+        archive.write_all(&[0u8; 2 * TAR_BLOCK_SIZE])?;
+        Ok(archive)
+    }
+
+    /// Helper to attempt decrypting candidate slot data with Tripwire options
+    fn try_decrypt_candidate(
+        slots_data: &[(SlackSlot, Vec<u8>)],
+        keys: &DerivedKeys,
+        candidate_tripwire: &Tripwire,
+    ) -> Option<(SecretPayload, Option<Tripwire>)> {
+        let bundle = DispersionScheduler::assemble(slots_data, &keys.prng_seed).ok()?;
+
+        // 1. Try with Tripwire AAD active
+        if let Ok(decrypted) = CryptoEngine::decrypt_with_keys(
+            &bundle,
+            keys,
+            Some(&candidate_tripwire.digest),
+        ) {
+            if let Ok(secret) = SecretPayload::from_bytes(&decrypted) {
+                return Some((secret, Some(candidate_tripwire.clone())));
+            }
+        }
+
+        // 2. Try without Tripwire AAD
+        if let Ok(decrypted) = CryptoEngine::decrypt_with_keys(&bundle, keys, None) {
+            if let Ok(secret) = SecretPayload::from_bytes(&decrypted) {
+                return Some((secret, None));
+            }
+        }
+
+        None
+    }
+
+    /// Unpacks and recovers secret payload from a Bootlegger TAR archive.
+    /// Transparently resolves Single, Primary, or Duress secret tiers.
     pub fn unpack_secret(
         archive_bytes: &[u8],
         password: &[u8],
@@ -242,10 +359,11 @@ impl TarEngine {
             return Err(BootlegError::AuthenticationFailed);
         }
 
-        // 1. Scan TAR blocks and extract decoy file metadata and slack data
         let mut cursor = Cursor::new(archive_bytes);
         let mut entries = Vec::new();
-        let mut slots_data = Vec::new();
+        let mut full_slots_data = Vec::new();
+        let mut part_a_slots_data = Vec::new();
+        let mut part_b_slots_data = Vec::new();
         let mut file_index = 0;
 
         let total_len = archive_bytes.len();
@@ -261,28 +379,23 @@ impl TarEngine {
                 break;
             }
 
-            // Check if end of archive (all zeroes)
             if header.iter().all(|&b| b == 0) {
                 break;
             }
 
-            // Parse header
             let name = String::from_utf8_lossy(&header[0..100])
                 .trim_matches('\0')
                 .to_string();
             let size = read_octal(&header[124..136]) as usize;
             let mtime = read_octal(&header[136..148]);
 
-            // Read file content
             let mut content = vec![0u8; size];
             if cursor.read_exact(&mut content).is_err() {
                 return Err(BootlegError::AuthenticationFailed);
             }
 
-            // Record carrier entry
             entries.push(CarrierEntry::new(name, size as u64, &content, mtime));
 
-            // Read slack padding up to next 512B boundary
             let remainder = size % TAR_BLOCK_SIZE;
             if remainder != 0 {
                 let slack_capacity = TAR_BLOCK_SIZE - remainder;
@@ -293,12 +406,37 @@ impl TarEngine {
                     return Err(BootlegError::AuthenticationFailed);
                 }
 
-                let slot = SlackSlot {
-                    file_index,
-                    archive_offset: slack_offset,
-                    capacity: slack_capacity,
-                };
-                slots_data.push((slot, slack_buf));
+                // Full slot (for Single secret mode)
+                full_slots_data.push((
+                    SlackSlot {
+                        file_index,
+                        archive_offset: slack_offset,
+                        capacity: slack_capacity,
+                    },
+                    slack_buf.clone(),
+                ));
+
+                // Partitioned sub-slots A & B (for Dual / Duress mode)
+                let cap_a = slack_capacity / 2;
+                let cap_b = slack_capacity - cap_a;
+
+                part_a_slots_data.push((
+                    SlackSlot {
+                        file_index,
+                        archive_offset: slack_offset,
+                        capacity: cap_a,
+                    },
+                    slack_buf[..cap_a].to_vec(),
+                ));
+
+                part_b_slots_data.push((
+                    SlackSlot {
+                        file_index,
+                        archive_offset: slack_offset + cap_a as u64,
+                        capacity: cap_b,
+                    },
+                    slack_buf[cap_a..].to_vec(),
+                ));
             }
 
             file_index += 1;
@@ -308,36 +446,26 @@ impl TarEngine {
             return Err(BootlegError::AuthenticationFailed);
         }
 
-        // 2. Compute carrier salt and derive keys
         let carrier_salt = compute_carrier_salt(&entries);
         let keys = CryptoEngine::derive_keys(password, &carrier_salt)?;
-
-        // 3. Reassemble ciphertext bundle
-        let bundle = DispersionScheduler::assemble(&slots_data, &keys.prng_seed)?;
-
-        // 4. Decrypt with candidate Tripwire
         let candidate_tripwire = Tripwire::compute(&entries);
 
-        // Try decrypt with Tripwire active first
-        let (decrypted_bytes, tripwire_info) = match CryptoEngine::decrypt_with_keys(
-            &bundle,
-            &keys,
-            Some(&candidate_tripwire.digest),
-        ) {
-            Ok(bytes) => (bytes, Some(candidate_tripwire)),
-            Err(_) => {
-                // Try without Tripwire
-                match CryptoEngine::decrypt_with_keys(&bundle, &keys, None) {
-                    Ok(bytes) => (bytes, None),
-                    Err(_) => {
-                        return Err(BootlegError::AuthenticationFailed);
-                    }
-                }
-            }
-        };
+        // Candidate 1: Full slack allocation (Single secret mode)
+        if let Some(res) = Self::try_decrypt_candidate(&full_slots_data, &keys, &candidate_tripwire) {
+            return Ok(res);
+        }
 
-        let secret = SecretPayload::from_bytes(&decrypted_bytes)?;
-        Ok((secret, tripwire_info))
+        // Candidate 2: Partition A (Primary secret in Dual mode)
+        if let Some(res) = Self::try_decrypt_candidate(&part_a_slots_data, &keys, &candidate_tripwire) {
+            return Ok(res);
+        }
+
+        // Candidate 3: Partition B (Duress secret in Dual mode)
+        if let Some(res) = Self::try_decrypt_candidate(&part_b_slots_data, &keys, &candidate_tripwire) {
+            return Ok(res);
+        }
+
+        Err(BootlegError::AuthenticationFailed)
     }
 
     /// Normal extraction of all decoy files from the archive (standard tar extraction)
@@ -406,17 +534,14 @@ mod tests {
         let secret = SecretPayload::new("confidential_budget.pdf", b"TOP SECRET FINANCIAL BUDGET 2027".to_vec());
         let password = b"ultra-secure-passphrase-2027";
 
-        // Pack with Tripwire active
         let tar_archive = TarEngine::pack(&decoys, &secret, password, true, Some(0.10)).unwrap();
         assert!(tar_archive.len() > 0);
 
-        // Unpack secret
         let (recovered_secret, tripwire) = TarEngine::unpack_secret(&tar_archive, password).unwrap();
         assert_eq!(recovered_secret.filename, "confidential_budget.pdf");
         assert_eq!(recovered_secret.data, b"TOP SECRET FINANCIAL BUDGET 2027");
         assert!(tripwire.is_some());
 
-        // Extract decoys normally (guaranteeing bit-for-bit integrity of cover files)
         let extracted_decoys = TarEngine::extract_decoys(&tar_archive).unwrap();
         assert_eq!(extracted_decoys.len(), decoys.len());
         for (orig, ext) in decoys.iter().zip(extracted_decoys.iter()) {
@@ -424,7 +549,6 @@ mod tests {
             assert_eq!(orig.content, ext.content);
         }
 
-        // Wrong password fails
         assert!(TarEngine::unpack_secret(&tar_archive, b"wrong-pass").is_err());
     }
 
@@ -440,11 +564,49 @@ mod tests {
 
         let mut archive = TarEngine::pack(&decoys, &secret, password, true, Some(0.10)).unwrap();
 
-        // Tamper with one byte inside the first file's content
         archive[512] ^= 0xFF;
 
-        // Unpack must fail because Tripwire detects tamper!
         let res = TarEngine::unpack_secret(&archive, password);
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_tar_duress_dual_secret_mode() {
+        let mut decoys = Vec::new();
+        for i in 0..12 {
+            let size = 1400 + i * 111;
+            decoys.push(DecoyFile::new(format!("project_file_{}.rs", i), vec![0x33; size]));
+        }
+
+        let real_secret = SecretPayload::new("real_master_key.pem", b"REAL_PRIVATE_KEY_DATA_00112233".to_vec());
+        let real_pass = b"MasterPasswordSuperSecret";
+
+        let duress_secret = SecretPayload::new("innocent_draft.txt", b"Harmless meeting notes for the boss".to_vec());
+        let duress_pass = b"CoercedDuressPassword";
+
+        let archive = TarEngine::pack_dual(
+            &decoys,
+            &real_secret,
+            real_pass,
+            &duress_secret,
+            duress_pass,
+            true,
+            Some(0.15),
+        ).unwrap();
+
+        // 1. Unpack with Master password -> recovers REAL secret
+        let (rec_real, tw1) = TarEngine::unpack_secret(&archive, real_pass).unwrap();
+        assert_eq!(rec_real.filename, "real_master_key.pem");
+        assert_eq!(rec_real.data, b"REAL_PRIVATE_KEY_DATA_00112233");
+        assert!(tw1.is_some());
+
+        // 2. Unpack with Duress password -> recovers DURESS secret seamlessly!
+        let (rec_duress, tw2) = TarEngine::unpack_secret(&archive, duress_pass).unwrap();
+        assert_eq!(rec_duress.filename, "innocent_draft.txt");
+        assert_eq!(rec_duress.data, b"Harmless meeting notes for the boss");
+        assert!(tw2.is_some());
+
+        // 3. Wrong password -> fails
+        assert!(TarEngine::unpack_secret(&archive, b"completely_wrong_pass").is_err());
     }
 }
