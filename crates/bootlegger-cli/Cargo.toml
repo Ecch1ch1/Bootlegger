@@ -1,0 +1,17 @@
+[package]
+name = "bootlegger-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "bootlegger"
+path = "src/main.rs"
+
+[dependencies]
+bootlegger-core = { path = "../bootlegger-core" }
+bootlegger-format = { path = "../bootlegger-format" }
+clap.workspace = true
+colored.workspace = true
+thiserror.workspace = true

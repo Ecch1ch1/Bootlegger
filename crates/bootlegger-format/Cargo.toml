@@ -1,0 +1,13 @@
+[package]
+name = "bootlegger-format"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+bootlegger-core = { path = "../bootlegger-core" }
+tar.workspace = true
+thiserror.workspace = true
+rand.workspace = true
+rand_chacha.workspace = true
