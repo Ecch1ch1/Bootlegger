@@ -70,7 +70,7 @@ impl DilutionAccountant {
             let deficit = secret_bytes - safe_capacity_bytes;
             let avg_file_size = (total_decoy_bytes / file_count).max(1024);
             let safe_per_file = ((avg_file_size as f64 * max_dilution) as usize).max(64);
-            let additional_files = (deficit + safe_per_file - 1) / safe_per_file;
+            let additional_files = deficit.div_ceil(safe_per_file);
 
             return Err(BootlegError::InsufficientCapacity {
                 needed_bytes: secret_bytes,

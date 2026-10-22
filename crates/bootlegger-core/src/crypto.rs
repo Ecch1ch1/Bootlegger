@@ -29,7 +29,6 @@ pub struct CryptoEngine;
 impl CryptoEngine {
     /// Derives encryption key and PRNG dispersion seed using Argon2id + HKDF
     pub fn derive_keys(password: &[u8], salt: &[u8; SALT_LEN]) -> Result<DerivedKeys> {
-        // Argon2id parameters (safe and fast for interactive CLI usage: 32MB RAM, 3 iterations)
         let params = Params::new(32 * 1024, 3, 1, Some(64))
             .map_err(|e| BootlegError::KeyDerivation(e.to_string()))?;
         let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
@@ -39,7 +38,6 @@ impl CryptoEngine {
             .hash_password_into(password, salt, &mut master)
             .map_err(|e| BootlegError::KeyDerivation(e.to_string()))?;
 
-        // Expand master key via HKDF-SHA256 into enc_key + prng_seed
         let hk = Hkdf::<Sha256>::new(None, &master);
         master.zeroize();
 
@@ -55,7 +53,7 @@ impl CryptoEngine {
     }
 
     /// Build Additional Authenticated Data (AAD) for ChaCha20-Poly1305
-    fn build_aad(tripwire_digest: Option<&[u8; 32]>) -> Vec<u8> {
+    pub fn build_aad(tripwire_digest: Option<&[u8; 32]>) -> Vec<u8> {
         let mut aad = Vec::with_capacity(33);
         match tripwire_digest {
             Some(digest) => {
@@ -69,18 +67,15 @@ impl CryptoEngine {
         aad
     }
 
-    /// Encrypts secret payload. Returns raw encrypted bundle (salt + nonce + ciphertext + tag)
-    pub fn encrypt(
+    /// Encrypts plaintext using provided derived keys. Output format: Nonce (12B) | Ciphertext + Tag
+    pub fn encrypt_with_keys(
         plaintext: &[u8],
-        password: &[u8],
+        keys: &DerivedKeys,
         tripwire_digest: Option<&[u8; 32]>,
-    ) -> Result<(Vec<u8>, DerivedKeys)> {
-        let mut salt = [0u8; SALT_LEN];
+    ) -> Result<Vec<u8>> {
         let mut nonce_bytes = [0u8; NONCE_LEN];
-        rand::thread_rng().fill_bytes(&mut salt);
         rand::thread_rng().fill_bytes(&mut nonce_bytes);
 
-        let keys = Self::derive_keys(password, &salt)?;
         let cipher = ChaCha20Poly1305::new(Key::from_slice(&keys.enc_key));
         let nonce = Nonce::from_slice(&nonce_bytes);
 
@@ -94,31 +89,26 @@ impl CryptoEngine {
             .encrypt(nonce, payload)
             .map_err(|_| BootlegError::AuthenticationFailed)?;
 
-        // Bundle: Salt (16B) | Nonce (12B) | Ciphertext+Tag
-        let mut bundle = Vec::with_capacity(SALT_LEN + NONCE_LEN + ciphertext.len());
-        bundle.extend_from_slice(&salt);
+        let mut bundle = Vec::with_capacity(NONCE_LEN + ciphertext.len());
         bundle.extend_from_slice(&nonce_bytes);
         bundle.extend_from_slice(&ciphertext);
 
-        Ok((bundle, keys))
+        Ok(bundle)
     }
 
-    /// Decrypts encrypted bundle. Enforces Tripwire digest check through AEAD AAD authentication
-    pub fn decrypt(
+    /// Decrypts ciphertext bundle (Nonce | Ciphertext + Tag) using provided derived keys
+    pub fn decrypt_with_keys(
         bundle: &[u8],
-        password: &[u8],
+        keys: &DerivedKeys,
         candidate_tripwire_digest: Option<&[u8; 32]>,
     ) -> Result<Vec<u8>> {
-        if bundle.len() < SALT_LEN + NONCE_LEN + TAG_LEN {
+        if bundle.len() < NONCE_LEN + TAG_LEN {
             return Err(BootlegError::AuthenticationFailed);
         }
 
-        let salt: &[u8; SALT_LEN] = bundle[..SALT_LEN].try_into().unwrap();
-        let nonce_bytes: &[u8; NONCE_LEN] =
-            bundle[SALT_LEN..SALT_LEN + NONCE_LEN].try_into().unwrap();
-        let ciphertext = &bundle[SALT_LEN + NONCE_LEN..];
+        let nonce_bytes: &[u8; NONCE_LEN] = bundle[..NONCE_LEN].try_into().unwrap();
+        let ciphertext = &bundle[NONCE_LEN..];
 
-        let keys = Self::derive_keys(password, salt)?;
         let cipher = ChaCha20Poly1305::new(Key::from_slice(&keys.enc_key));
         let nonce = Nonce::from_slice(nonce_bytes);
 
@@ -144,22 +134,17 @@ mod tests {
     fn test_encrypt_decrypt_roundtrip() {
         let password = b"correct-horse-battery-staple";
         let secret = b"TOP SECRET MISSION DIRECTIVE 007";
+        let salt = [12u8; SALT_LEN];
         let tripwire_digest = [42u8; 32];
 
-        // Encrypt with Tripwire
-        let (bundle, _) =
-            CryptoEngine::encrypt(secret, password, Some(&tripwire_digest)).unwrap();
+        let keys = CryptoEngine::derive_keys(password, &salt).unwrap();
+        let bundle = CryptoEngine::encrypt_with_keys(secret, &keys, Some(&tripwire_digest)).unwrap();
 
-        // Decrypt with correct password & matching tripwire digest
-        let decrypted =
-            CryptoEngine::decrypt(&bundle, password, Some(&tripwire_digest)).unwrap();
+        let decrypted = CryptoEngine::decrypt_with_keys(&bundle, &keys, Some(&tripwire_digest)).unwrap();
         assert_eq!(decrypted, secret);
 
-        // Decrypt with WRONG password fails
-        assert!(CryptoEngine::decrypt(&bundle, b"wrong-pass", Some(&tripwire_digest)).is_err());
-
-        // Decrypt with TAMPERED tripwire digest (carrier was touched!) fails
+        // Wrong tripwire fails
         let tampered_digest = [99u8; 32];
-        assert!(CryptoEngine::decrypt(&bundle, password, Some(&tampered_digest)).is_err());
+        assert!(CryptoEngine::decrypt_with_keys(&bundle, &keys, Some(&tampered_digest)).is_err());
     }
 }
