@@ -1,0 +1,36 @@
+# Maintainer: Ecch1ch1 <ecch1ch1@users.noreply.github.com>
+pkgname=bootlegger-git
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Plausible Deniability & Dilution Steganography for Covert Data Storage"
+arch=('x86_64' 'aarch64')
+url="https://github.com/Ecch1ch1/Bootlegger"
+license=('MPL-2.0')
+depends=('gcc-libs')
+makedepends=('cargo' 'git')
+provides=('bootlegger')
+conflicts=('bootlegger')
+source=("git+https://github.com/Ecch1ch1/Bootlegger.git")
+sha256sums=('SKIP')
+
+pkgver() {
+    cd "$srcdir/Bootlegger"
+    printf "0.1.0.r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+build() {
+    cd "$srcdir/Bootlegger"
+    cargo build --release --locked -p bootlegger-cli
+}
+
+check() {
+    cd "$srcdir/Bootlegger"
+    cargo test --workspace --locked
+}
+
+package() {
+    cd "$srcdir/Bootlegger"
+    install -Dm755 "target/release/bootlegger" "$pkgdir/usr/bin/bootlegger"
+    install -Dm644 "README.md" "$pkgdir/usr/share/doc/$pkgname/README.md"
+    install -Dm644 "LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

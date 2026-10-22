@@ -13,5 +13,6 @@ path = "src/main.rs"
 bootlegger-core = { path = "../bootlegger-core" }
 bootlegger-format = { path = "../bootlegger-format" }
 clap.workspace = true
+clap_complete.workspace = true
 colored.workspace = true
 thiserror.workspace = true
