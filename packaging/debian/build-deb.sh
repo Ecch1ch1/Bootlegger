@@ -36,7 +36,7 @@ Version: ${VERSION}
 Section: utils
 Priority: optional
 Architecture: ${DEB_ARCH}
-Maintainer: Ecch1ch1 <ecch1ch1@users.noreply.github.com>
+Maintainer: Ecch1ch1 <bootlegger.omnivore184@passfwd.com>
 Description: Plausible Deniability & Dilution Steganography for Covert Data Storage
  Bootlegger conceals secret payloads inside standard, valid archives (e.g. TAR)
  using micro-dispersion into block slack space, strict dilution budgets, and
