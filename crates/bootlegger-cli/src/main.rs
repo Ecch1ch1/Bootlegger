@@ -464,7 +464,7 @@ fn execute_pack(
             eprintln!("\n{}", "⚠️  CARRIER CAPACITY INSUFFICIENT FOR SAFE DILUTION".red().bold());
             eprintln!("  Secret payload requires {} bytes of stealth budget.", needed_bytes.to_string().yellow());
             eprintln!("  Selected cover files only provide {} bytes under safe dilution ratio.", available_bytes.to_string().yellow());
-            eprintln!("  {}", "Rule: \"Buď tak akorát nebo víc, ale nikdy ne míň.\"".italic().bold());
+            eprintln!("  {}", "Rule: \"Decoy volume must be proportional to secret size — stealth budget exceeded.\"".italic().bold());
             eprintln!("  👉 Please add at least {} more decoy files to the carrier set.", additional_files_needed.to_string().cyan().bold());
             std::process::exit(2);
         }

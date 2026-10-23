@@ -62,7 +62,8 @@ impl DilutionAccountant {
             })
             .sum();
 
-        // We allow up to natural slack + proportional dilution budget
+        // Safe capacity is the maximum safe stealth dilution budget (e.g. 3% of total cover volume)
+        // or the natural block slack, whichever is larger.
         let ratio_budget = (total_decoy_bytes as f64 * max_dilution) as usize;
         let safe_capacity_bytes = natural_slack.max(ratio_budget);
 
