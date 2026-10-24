@@ -1,7 +1,7 @@
 # Bootlegger 🥾📦
 
 > **Plausible Deniability & Dilution Steganography for Covert Data Storage**  
-> *"Být paranoidní nestačí."*
+> *"Being paranoid is not enough."*
 
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL_2.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
 [![Language: Rust](https://img.shields.io/badge/Language-Rust_2024-orange.svg)](https://www.rust-lang.org/)
@@ -27,7 +27,7 @@ Experience Bootlegger's memory architecture, dual-passphrase decryption, Tripwir
 
 * 🥾 **Zero-Footprint Format:** No `BOOTLEG` magic bytes or detectable markers. The archive is 100% compliant POSIX USTAR. Standard tools extract all visible decoy files with exact checksums.
 * 🎭 **Multi-Tier Duress Decoy:** Dual-layer plausible deniability. Entering the **Master Passphrase** extracts the true secret. Entering the **Duress Passphrase** extracts a harmless decoy document. The examiner has zero mathematical or statistical proof that a second secret exists!
-* ⚖️ **Dilution Accountant:** Enforces mathematical stealth budgets. Decoy volume must naturally swallow the secret — *"buď tak akorát nebo víc, ale nikdy ne míň"*. Halts packaging if cover volume is insufficient.
+* ⚖️ **Dilution Accountant:** Enforces mathematical stealth budgets. Decoy volume must naturally swallow the secret — *"just enough or more, but never less"*. Halts packaging if cover volume is insufficient.
 * 🛡️ **Tripwire Anti-Tamper:** Pinned carrier integrity via Merkle tree / BLAKE3. If an investigator touches, modifies, re-packs, or inspects even 1 bit of any decoy file, AEAD decryption automatically aborts.
 * 🧙 **Interactive Guided Wizard:** Run `bootlegger wizard` (or just `bootlegger`) for an intuitive step-by-step terminal interface.
 * 🐚 **Shell Auto-Completions:** Built-in auto-completion generator for Bash, Zsh, Fish, and PowerShell.

@@ -4,7 +4,7 @@
 
 **Bootlegger** is a plausible-deniability steganographic archiving system that conceals encrypted secret payloads inside legitimate, standardized cover archives (e.g. POSIX / GNU TAR) without generating file size anomalies, protocol header signatures, or detectable high-entropy localized spikes.
 
-The core design philosophy is **extreme cryptographic paranoia**: the archive contains zero magic bytes, enforces a mathematically verified dilution ratio ("buď tak akorát nebo víc, ale nikdy ne míň"), and optionally binds the secret to a brittle, bitwise-pinned **Tripwire** Merkle tree that self-destructs if any carrier file is altered, inspected, or re-packed.
+The core design philosophy is **extreme cryptographic paranoia**: the archive contains zero magic bytes, enforces a mathematically verified dilution ratio ("just enough or more, but never less"), and optionally binds the secret to a brittle, bitwise-pinned **Tripwire** Merkle tree that self-destructs if any carrier file is altered, inspected, or re-packed.
 
 ---
 

@@ -1,6 +1,6 @@
 # Bootlegger: Security Model & Paranoid Threat Assessment
 
-> *"Být paranoidní nestačí." — Bootlegger Design Maxim*
+> *"Being paranoid is not enough." — Bootlegger Design Maxim*
 
 This document formalizes the threat landscape, adversarial assumptions, and defense mechanisms implemented in Bootlegger.
 
@@ -27,7 +27,7 @@ Traditional steganographic utilities often betray their existence by writing a s
 * No salt stored in plaintext. The 16-byte cryptographic salt is deterministically derived from the carrier structure itself.
 * The length of the secret payload is encrypted using a ChaCha20 PRNG stream mask.
 
-### 2.2. The Dilution Principle ("Buď tak akorát nebo víc, ale nikdy ne míň")
+### 2.2. The Dilution Principle ("Just Enough or More, but Never Less")
 Just as micro-dosed alcohol in a solution is undetectable by taste or visual inspection, secret data must be micro-dosed into a carrier.
 * Storing a 50 MB secret inside a 100 KB document collection is reckless and mathematically provable as an anomaly.
 * Bootlegger's `DilutionAccountant` refuses to pack if the secret exceeds the safe stealth budget. If a user tries to pack into insufficient cover, Bootlegger halts and calculates the exact number of additional decoy files required.

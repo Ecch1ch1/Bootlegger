@@ -28,7 +28,7 @@ impl DilutionAccountant {
     ///
     /// Principle: The decoy media must be large enough to dilute the secret so that
     /// the relative change in size and entropy is statistically negligible.
-    /// "Buď tak akorát nebo víc, ale nikdy ne míň."
+    /// "Just enough or more, but never less."
     pub fn assess(
         entries: &[CarrierEntry],
         secret_bytes: usize,
